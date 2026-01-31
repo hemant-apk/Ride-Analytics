@@ -10,7 +10,7 @@ Charts in this tool are powered by **[Google Charts](https://developers.google.c
 
 ## Try it Here
 
-You can try Ride Analytics directly in your browser without downloading:
+You can try Ride Analytics directly in your browser:
 
 [**https://ride-analytics.pages.dev/**](https://ride-analytics.pages.dev/)  
 
