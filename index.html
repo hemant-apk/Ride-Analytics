@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Ride Analytics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="wrapper">
+  <a style="text-decoration: none;color:#111;" href="index.html"><h1>Ride Analytics</h1></a>  
+    <div class="subtitle">Your private Uber trip dashboard — analyze your data directly in the browser.</div>
+
+    <section class="about-tool" id="aboutToolSection">
+      <h2>About This Tool</h2>
+      <p>
+        Ride Analytics is a privacy-friendly, client-side tool that helps you
+        understand your ride history in seconds.
+      </p>
+
+      <ul>
+        <li>Upload your Uber trips CSV — no login required</li>
+        <li>Analyze total spend, ride count, distance, and time</li>
+        <li>View monthly spending trends and vehicle usage</li>
+        <li>All processing happens in your browser</li>
+      </ul>
+
+      <p class="note">
+        Your data never leaves your device.
+      </p>
+    </section>
+
+    <details class="section">
+      <summary>
+        <span class="title"><b>How to Download Your Uber Trip Data</b></span>
+      </summary>
+      <div class="steps">
+        <ol>
+          <li>
+            Go to
+            <small>
+              <a href="https://myprivacy.uber.com/exploreyourdata/trips" target="_blank">
+                https://myprivacy.uber.com/exploreyourdata/trips
+              </a>
+            </small>
+            and sign in with your Uber account.
+          </li>
+          <li>
+            Request your trip data by clicking the download/request option.
+          </li>
+          <li>
+            Wait for the
+            <a href="https://mail.google.com/mail/u/0/#search/from%3Auber.com+Your+Uber+data+is+ready+for+download"
+              target="_blank">
+              email from Uber
+            </a>.
+            Data preparation usually takes <strong>1–2 days</strong>.
+          </li>
+          <li>
+            Download the ZIP file from the email.
+          </li>
+          <li>
+            Extract the ZIP → open the <strong>Rider</strong> folder → use
+            <strong>trips_data-0.csv</strong> for analysis.
+          </li>
+        </ol>
+      </div>
+    </details>
+
+    <!-- UPLOAD -->
+    <div class="section">
+      <div class="upload">
+        <input type="file" id="csvFile" accept=".csv">
+        <button onclick="processCSV()">Analyze</button>
+      </div>
+    </div>
+
+    <!-- Currency Filter -->
+    <div class="section hidden" id="currencyFilterSection">
+      <div class="filter">
+        <label for="currencyFilter"><b>Filter by Currency:</b></label>
+        <select id="currencyFilter"></select>
+      </div>
+    </div>
+
+    <!-- Fare -->
+    <div class="section hidden" id="fareSection">
+      <h2>Fare</h2>
+      <div class="metrics" id="fareStats"></div>
+    </div>
+
+    <!-- Distance & Time -->
+    <div class="section hidden" id="distanceTimeSection">
+      <h2>Distance & Ride Duration</h2>
+      <div class="metrics" id="distanceStats"></div>
+      <div class="metrics" id="timeStats"></div>
+    </div>
+
+    <!-- Vehicle -->
+    <div class="section hidden" id="vehicleSection">
+      <h2>Vehicle Bookings</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Vehicle</th>
+            <th>Bookings</th>
+            <th>Spend</th>
+          </tr>
+        </thead>
+        <tbody id="pivotTable"></tbody>
+      </table>
+    </div>
+
+    <!-- Monthly -->
+    <div class="section hidden" id="monthlySection">
+      <h2>Monthly Spend</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>Spend</th>
+          </tr>
+        </thead>
+        <tbody id="monthlyTable"></tbody>
+      </table>
+      <div id="monthlyChart" class="chart" style="height:300px"></div>
+    </div>
+
+    <!-- Day of Week -->
+    <div class="section hidden" id="daySection">
+      <h2>Rides by Day of Week</h2>
+      <div class="filter">
+        <select id="filterMonthYear"></select>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>Rides</th>
+          </tr>
+        </thead>
+        <tbody id="dayPivotTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    google.charts.load("current", { packages: ["corechart"] });
+
+    let dataRows = [], monthSet = new Set(), currencySet = new Set();
+    let selectedCurrency = null;
+
+    document.getElementById("filterMonthYear").addEventListener("change", updateDayPivot);
+    document.getElementById("currencyFilter").addEventListener("change", () => {
+      selectedCurrency = document.getElementById("currencyFilter").value;
+      analyze();
+    });
+
+    function parseCSV(text) {
+      const rows = [];
+      let row = [], val = '', inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"') inQuotes = !inQuotes;
+        else if (c === ',' && !inQuotes) { row.push(val); val = ''; }
+        else if ((c === '\n' || c === '\r') && !inQuotes) {
+          if (val || row.length) { row.push(val); rows.push(row); row = []; val = ''; }
+        } else val += c;
+      }
+      if (val || row.length) row.push(val);
+      if (row.length) rows.push(row);
+      return rows.map(r => r.map(c => c.trim()));
+    }
+
+    function formatFriendlyTime(m) {
+      const h = Math.floor(m / 60), mm = Math.floor(m % 60), s = Math.floor((m * 60) % 60);
+      let result = "";
+      if (h) result += h + "h ";
+      if (mm || h) result += mm + "m ";
+      result += s + "s";
+      return result;
+    }
+
+    function processCSV() {
+      const f = document.getElementById("csvFile").files[0];
+      if (!f) return alert("Please select a CSV file.");
+      const reader = new FileReader();
+      reader.onload = e => {
+        dataRows = parseCSV(e.target.result);
+        setupCurrencyFilter();
+        analyze();
+      };
+      reader.readAsText(f);
+    }
+
+    function setupCurrencyFilter() {
+      const h = dataRows[0];
+      const curI = h.indexOf("currency_code");
+      const currencyCount = {};
+
+      for (let r = 1; r < dataRows.length; r++) {
+        const cur = dataRows[r][curI];
+        if (!cur) continue;
+        currencyCount[cur] = (currencyCount[cur] || 0) + 1;
+      }
+
+      const sortedCurrencies = Object.entries(currencyCount).sort((a, b) => b[1] - a[1]).map(a => a[0]);
+      selectedCurrency = sortedCurrencies[0];
+
+      const sel = document.getElementById("currencyFilter");
+      sel.innerHTML = sortedCurrencies.map(c => `<option value="${c}">${c}</option>`).join("");
+      sel.value = selectedCurrency;
+      document.getElementById("currencyFilterSection").classList.remove("hidden");
+    }
+
+    function analyze() {
+
+      // Hide About This Tool when analysis starts
+      document.getElementById("aboutToolSection").classList.add("hidden");
+
+
+      const h = dataRows[0];
+      const i = n => h.indexOf(n);
+
+      const fareI = i("fare_amount"), distI = i("fare_distance_miles"),
+        timeI = i("fare_duration_minutes"), vehI = i("product_type_name"),
+        tsI = i("begintrip_timestamp_local"), statusI = i("status"),
+        curI = i("currency_code");
+
+      let sum = 0, maxF = -1e9, minF = 1e9, maxD = -1e9, minD = 1e9, maxT = -1e9, minT = 1e9, count = 0;
+      const veh = {}, months = {}; monthSet.clear();
+
+      for (let r = 1; r < dataRows.length; r++) {
+        const row = dataRows[r];
+        if (row[statusI]?.toLowerCase() !== "completed") continue;
+        if (selectedCurrency && row[curI] !== selectedCurrency) continue;
+        count++;
+
+        const f = parseFloat(row[fareI]?.replace(/,/g, ""));
+        const d = parseFloat(row[distI]), t = parseFloat(row[timeI]);
+        const ts = row[tsI] ? new Date(row[tsI]) : null;
+
+        if (!isNaN(f)) { sum += f; maxF = Math.max(maxF, f); minF = Math.min(minF, f); }
+        if (!isNaN(d)) { maxD = Math.max(maxD, d); minD = Math.min(minD, d); }
+        if (!isNaN(t)) { maxT = Math.max(maxT, t); minT = Math.min(minT, t); }
+
+        if (row[vehI]) { veh[row[vehI]] ??= { c: 0, s: 0 }; veh[row[vehI]].c++; if (!isNaN(f)) veh[row[vehI]].s += f; }
+
+        if (ts && !isNaN(f)) {
+          const k = `${ts.getUTCFullYear()}-${String(ts.getUTCMonth() + 1).padStart(2, "0")}`;
+          months[k] = (months[k] || 0) + f;
+          monthSet.add(k);
+        }
+      }
+
+      if (count === 0) {
+        document.getElementById("aboutToolSection").classList.remove("hidden");
+        alert("No completed rides found for the selected currency.");
+        return;
+      }
+
+      document.getElementById("fareStats").innerHTML = `
+        <div class="metric"><span>Completed Rides</span><span>${count}</span></div>
+        <div class="metric"><span>Total Amount Spent (${selectedCurrency})</span><span>${sum.toFixed(2)}</span></div>
+        <div class="metric"><span>Max Amount Spent on a Ride</span><span>${maxF.toFixed(2)}</span></div>`;
+
+      document.getElementById("distanceStats").innerHTML = `
+        <div class="metric"><span>Longest Distance</span><span>${maxD.toFixed(2)} miles</span></div>
+        <div class="metric"><span>Shortest Distance</span><span>${minD.toFixed(2)} miles</span></div>`;
+
+      document.getElementById("timeStats").innerHTML = `
+        <div class="metric"><span>Longest Ride Duration</span><span>${formatFriendlyTime(maxT)}</span></div>
+        <div class="metric"><span>Shortest Ride Duration</span><span>${formatFriendlyTime(minT)}</span></div>`;
+
+      document.getElementById("pivotTable").innerHTML = Object.entries(veh).map(([k, v]) => `<tr><td>${k}</td><td>${v.c}</td><td>${v.s.toFixed(2)}</td></tr>`).join("");
+
+      const mNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const desc = Object.keys(months).sort((a, b) => b.localeCompare(a));
+
+      document.getElementById("monthlyTable").innerHTML = desc.map(k => { const [y, m] = k.split("-"); return `<tr><td>${mNames[m - 1]} ${y}</td><td>${months[k].toFixed(2)}</td></tr>` }).join("");
+
+      google.charts.setOnLoadCallback(() => {
+        const asc = [...desc].reverse();
+        const arr = [["Month", "Spend"]];
+        asc.forEach(k => { const [y, m] = k.split("-"); arr.push([`${mNames[m - 1]} ${y}`, months[k]]); });
+        new google.visualization.ColumnChart(document.getElementById("monthlyChart")).draw(
+          google.visualization.arrayToDataTable(arr),
+          { legend: "none", backgroundColor: "transparent", colors: ["#000"], hAxis: { textStyle: { color: "#000" } }, vAxis: { textStyle: { color: "#000" } } }
+        );
+      });
+
+      populateMonthFilter();
+      updateDayPivot();
+
+      // Show sections
+      ["fareSection", "distanceTimeSection", "vehicleSection", "monthlySection", "daySection"].forEach(id => {
+        document.getElementById(id).classList.remove("hidden");
+      });
+    }
+
+    function populateMonthFilter() {
+      const sel = document.getElementById("filterMonthYear");
+      const mNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      sel.innerHTML = '<option value="all">All</option>' + [...monthSet].sort((a, b) => b.localeCompare(a)).map(k => { const [y, m] = k.split("-"); return `<option value="${k}">${mNames[m - 1]} ${y}</option>`; }).join("");
+    }
+
+    function updateDayPivot() {
+      const f = document.getElementById("filterMonthYear").value;
+      const h = dataRows[0];
+      const tsI = h.indexOf("begintrip_timestamp_local"), statusI = h.indexOf("status"), curI = h.indexOf("currency_code");
+      const dCnt = {};
+
+      for (let r = 1; r < dataRows.length; r++) {
+        const row = dataRows[r];
+        if (row[statusI]?.toLowerCase() !== "completed") continue;
+        if (selectedCurrency && row[curI] !== selectedCurrency) continue;
+        const ts = row[tsI] ? new Date(row[tsI]) : null;
+        if (!ts) continue;
+        const k = `${ts.getUTCFullYear()}-${String(ts.getUTCMonth() + 1).padStart(2, "0")}`;
+        if (f !== "all" && k !== f) continue;
+        const d = ts.getUTCDay();
+        dCnt[d] = (dCnt[d] || 0) + 1;
+      }
+
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      document.getElementById("dayPivotTable").innerHTML = days.map((d, i) => `<tr><td>${d}</td><td>${dCnt[i] || 0}</td></tr>`).join("");
+    }
+
+  </script>
+</body>
+<footer style="text-align: center; padding: 20px 10px; font-size: 0.85rem; color: #555; margin-top: 50px;">
+  This is an independent dashboard for analyzing your Uber trip data and is <strong>not affiliated with Uber</strong> in any way.  
+  <br>
+  View or contribute on <a href="https://github.com/hemant-apk/Ride-Analytics" target="_blank">GitHub</a>.
+</footer>
+
+
+</html>
