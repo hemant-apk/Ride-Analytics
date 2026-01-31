@@ -30,7 +30,7 @@ You can try Ride Analytics directly in your browser without downloading:
 
 ## How to Download Your Uber Trip Data
 
-1. Go to [Uber Privacy Portal](https://myprivacy.uber.com/exploreyourdata/trips) and sign in with your Uber account.
+1. Go to [https://myprivacy.uber.com/exploreyourdata/trips](https://myprivacy.uber.com/exploreyourdata/trips) and sign in with your Uber account.
 2. Request your trip data by clicking the download/request option.
 3. Wait for the [email from Uber](https://mail.google.com/mail/u/0/#search/from%3Auber.com+Your+Uber+data+is+ready+for+download). Data preparation usually takes **1–2 days**.
 4. Download the ZIP file from the email.
